@@ -2,13 +2,50 @@ from flask import Flask, request, jsonify, make_response
 from pymongo import MongoClient
 from bson import ObjectId
 import string
+import jwt
+import datetime
+from functools import wraps
+import bcrypt
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'mysecret'
 
 client = MongoClient("mongodb://127.0.0.1:27017" )
 db = client.bizDB # select the database
 businesses = db.biz # select the collection
+users = db.users # select the collection
+blacklist = db.blacklist # select the collection
 
+#JWT REQUIRED DECORATOR
+def jwt_required(func):
+   @wraps(func)
+   def jwt_required_wrapper(*args, **kwargs):
+      token = None
+      if 'x-access-token' in request.headers:
+         token = request.headers['x-access-token'] #gets the token from the header
+      if not token:
+         return make_response(jsonify({'message' : 'Token is missing'}), 401)
+      try:
+         data = jwt.decode(token, app.config['SECRET_KEY'], algorithms="HS256")
+      except:
+         return make_response(jsonify({'message' : 'Token is invalid'}), 401)
+      bl_token = blacklist.find_one({"token":token})
+      if bl_token is not None:
+         return make_response(jsonify( {'message' : 'Token has been cancelled' } ), 401)
+      return func(*args, **kwargs)
+   return jwt_required_wrapper
+
+def admin_required(func):
+   @wraps(func)
+   def admin_required_wrapper(*args, **kwargs):
+      token = request.headers['x-access-token']
+      data = jwt.decode(token, app.config['SECRET_KEY'], algorithms="HS256")
+      if data["admin"]:
+         return func(*args, **kwargs)
+      else:
+         return make_response(jsonify( {
+            'message' : 'Admin access required' } ), 401 )
+   return admin_required_wrapper
 
 @app.route("/api/v1.0/businesses", methods=["GET"])
 def show_all_businesses():
@@ -30,6 +67,7 @@ def show_all_businesses():
 
 
 @app.route("/api/v1.0/businesses/<string:id>", methods=['GET'])
+@jwt_required
 def show_one_business(id):
   if len(id) != 24 or not all(c in string.hexdigits for c in id):
     return make_response( jsonify( { "error" : "Invalid business ID" } ), 404 )#checks if the id is valid
@@ -80,6 +118,8 @@ def edit_business(id):
 
 
 @app.route("/api/v1.0/businesses/<string:id>", methods=["DELETE"])
+@jwt_required
+@admin_required
 def delete_business(id):
    result = businesses.delete_one( { "_id" : ObjectId(id) } )
    if result.deleted_count == 1:
@@ -111,7 +151,7 @@ def fetch_all_reviews(id):
    for review in business["reviews"]:
     review["_id"] = str(review["_id"])
     data_to_return.append(review)
-    return make_response( jsonify( data_to_return ), 200 )
+   return make_response( jsonify( data_to_return ), 200 )
 
 
 @app.route("/api/v1.0/businesses/<bid>/reviews/<rid>", methods=["GET"])
@@ -143,12 +183,40 @@ def edit_review(bid, rid):
 
 
 @app.route("/api/v1.0/businesses/<bid>/reviews/<rid>", methods=["DELETE"])
+@jwt_required
+@admin_required
 def delete_review(bid, rid):
   businesses.update_one(
      { "_id" : ObjectId(bid) },
      {"$pull" : { "reviews" : { "_id" : ObjectId(rid) } } }
   )
   return make_response( jsonify( {} ), 204)
+#login stage
+@app.route("/api/v1.0/login", methods=["GET"])
+def login():
+   auth = request.authorization
+   if auth and auth:
+      user = users.find_one({ 'username' : auth.username })#checks if the username is in the database
+      if user is not None:
+         if bcrypt.checkpw(bytes(auth.password, 'utf-8'), user['password']):#checks if the password is correct
+            token = jwt.encode( {
+               'user' : auth.username,#username is the username
+               'admin' : user['admin'],
+               'exp' : datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=30) 
+            },app.config['SECRET_KEY'],algorithm="HS256")
+            return make_response(jsonify({'token' : token}), 200)
+         else:
+            return make_response(jsonify({'message' : 'Bad password'}), 401)
+      else:
+         return make_response(jsonify({'message' : 'Bad Username'}), 401)
+   return make_response( jsonify( { "message" : "Authentication required" } ), 401 )
+
+@app.route('/api/v1.0/logout', methods=["GET"])
+@jwt_required
+def logout():
+   token = request.headers['x-access-token']
+   blacklist.insert_one({"token":token})
+   return make_response(jsonify( {'message' : 'Logout successful' } ), 200 )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001, debug=True)
