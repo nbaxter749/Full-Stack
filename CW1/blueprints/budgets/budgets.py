@@ -10,23 +10,23 @@ budgets = globals.db.budgets # select the collection name
 
 @budgets_bp.route("/api/v1.0/budgets", methods=["GET"])
 def show_all_budgets():
-  page_num, page_size = 1, 10
-  if request.args.get('pn'):
-    page_num = int(request.args.get('pn'))
-  if request.args.get('ps'):
-      page_size = int(request.args.get('ps'))
-  page_start = (page_size * (page_num - 1))
-      
-  data_to_return = []
-  for budget in budgets.find() .skip(page_start).limit(page_size):
-      budget['_id'] = str(budget['_id'])
-      for expense in budget['expenses']:
+    page_num, page_size = 1, 10
+    if request.args.get('pn'):
+        page_num = int(request.args.get('pn'))
+    if request.args.get('ps'):
+        page_size = int(request.args.get('ps'))
+    page_start = (page_size * (page_num - 1))
+    
+    data_to_return = []
+    for budget in budgets.find().skip(page_start).limit(page_size):
+        budget['_id'] = str(budget['_id'])
+        for expense in budget['expenses']:
             expense['_id'] = str(expense['_id'])
-      for review in budget['reviews']:
-        review['_id'] = str(review['_id'])
-      data_to_return.append(budget)
-      
-  return make_response( jsonify(data_to_return), 200 )
+        for review in budget['reviews']:
+            review['_id'] = str(review['_id'])
+        data_to_return.append(budget)
+    
+    return make_response(jsonify(data_to_return), 200)
 
 
 @budgets_bp.route("/api/v1.0/budgets/<string:id>", methods=['GET'])
