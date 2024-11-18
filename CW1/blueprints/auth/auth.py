@@ -8,7 +8,7 @@ from decorators import jwt_required, admin_required
 auth_bp = Blueprint("auth_bp", __name__)
 
 users = globals.db.users
-blacklist = globals.db.blacklilst
+blacklist = globals.db.blacklist
 
 
 #login stage
