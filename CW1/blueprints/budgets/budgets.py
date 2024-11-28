@@ -24,7 +24,18 @@ def show_all_budgets():
             expense['_id'] = str(expense['_id'])
         for review in budget['reviews']:
             review['_id'] = str(review['_id'])
-        data_to_return.append(budget)
+        # Reorder fields
+        ordered_budget = {
+            "_id": budget['_id'],
+            "username": budget['username'],
+            "monthly_income": budget['monthly_income'],
+            "expenses": budget['expenses'],
+            "savings": budget['savings'],
+            "town": budget['town'],
+            "location": budget['location'],
+            "reviews": budget['reviews']
+        }
+        data_to_return.append(ordered_budget)
     
     return make_response(jsonify(data_to_return), 200)
 
@@ -41,6 +52,17 @@ def show_one_budget(id):
             expense['_id'] = str(expense['_id'])
       for review in budget['reviews']:
           review['_id'] = str(review['_id']) #converts the object id to string
+         # Reorder fields
+      ordered_budget = {
+         "_id": budget['_id'],
+         "username": budget['username'],
+         "monthly_income": budget['monthly_income'],
+         "expenses": budget['expenses'],
+         "savings": budget['savings'],
+         "town": budget['town'],
+         "location": budget['location'],
+         "reviews": budget['reviews']
+        }
       return make_response( jsonify( budget), 200 )##gets budget id
   else:
     return make_response( jsonify( { "error" : "Invalid budget ID" } ), 404 )
@@ -49,48 +71,65 @@ def show_one_budget(id):
 @budgets_bp.route("/api/v1.0/budgets", methods=["POST"])
 @jwt_required
 def add_budget():
-  if "username" in request.form and "monthly_income" in request.form:
-     new_budget = {
-            "username": request.form["username"],
-            "monthly_income": float(request.form["monthly_income"]),
+    try:
+        if "username" not in request.form or "monthly_income" not in request.form:
+            return make_response(jsonify({"error": "Missing form data"}), 400)
+        
+        username = request.form["username"]
+        monthly_income = float(request.form["monthly_income"])
+        town = request.form.get("town", "")
+        latitude = float(request.form.get("latitude", 0))
+        longitude = float(request.form.get("longitude", 0))
+        
+        new_budget = {
+            "username": username,
+            "monthly_income": monthly_income,
             "expenses": [],
             "savings": {"goal": 0, "current": 0, "progress": 0},
-            "reviews": [],
+            "town": town,
             "location": {
                 "type": "Point",
-                "coordinates": [
-                    float(request.form.get("latitude", 0)),
-                    float(request.form.get("longitude", 0))
-                ]
+                "coordinates": [latitude, longitude]
             },
-            "town": request.form.get("town", "")
-    }
-     new_budget_id = budgets.insert_one(new_budget)
-     new_budget_link = "http://localhost:5001/api/v1.0/budgets/"+ str(new_budget_id.inserted_id)
-     return make_response( jsonify( {"url": new_budget_link} ), 201)
-  else:
-     return make_response( jsonify({"error":"Missing form data"} ), 404)
+            "reviews": []
+        }
+        new_budget_id = budgets.insert_one(new_budget).inserted_id
+        new_budget_link = f"http://localhost:5001/api/v1.0/budgets/{new_budget_id}"
+        return make_response(jsonify({"url": new_budget_link}), 201)
+    except ValueError:
+        return make_response(jsonify({"error": "Invalid data type"}), 400)
+    except Exception as e:
+        return make_response(jsonify({"error": str(e)}), 500)
   
 
 @budgets_bp.route("/api/v1.0/budgets/<string:id>", methods=["PUT"])
 @jwt_required
 @admin_required
 def edit_budget(id):
-    if "username" in request.form and "monthly_income" in request.form:
+    try:
+        if "username" not in request.form or "monthly_income" not in request.form:
+            return make_response(jsonify({"error": "Missing form data"}), 400)
+        
+        username = request.form["username"]
+        monthly_income = float(request.form["monthly_income"])
+        savings_goal = float(request.form.get("savings_goal", 0))
+        savings_current = float(request.form.get("savings_current", 0))
+        savings_progress = float(request.form.get("savings_progress", 0))
+        town = request.form.get("town", "")
+        latitude = float(request.form.get("latitude", 0))
+        longitude = float(request.form.get("longitude", 0))
+        
         update_fields = {
-            "username": request.form["username"],
-            "monthly_income": float(request.form["monthly_income"]),
-            "savings.goal": float(request.form.get("savings_goal", 0)),
-            "savings.current": float(request.form.get("savings_current", 0)),
-            "savings.progress": float(request.form.get("savings_progress", 0)),
+            "username": username,
+            "monthly_income": monthly_income,
+            "savings.goal": savings_goal,
+            "savings.current": savings_current,
+            "savings.progress": savings_progress,
+            "town": town,
             "location": {
                 "type": "Point",
-                "coordinates": [
-                    float(request.form.get("latitude", 0)),
-                    float(request.form.get("longitude", 0))
-                ]
-            },
-            "town": request.form.get("town", "")
+                "coordinates": [latitude, longitude]
+            }
         }
         result = budgets.update_one({"_id": ObjectId(id)}, {"$set": update_fields})
         if result.matched_count == 1:
@@ -98,8 +137,10 @@ def edit_budget(id):
             return make_response(jsonify({"url": edited_budget_link}), 200)
         else:
             return make_response(jsonify({"error": "Invalid budget ID"}), 404)
-    else:
-        return make_response(jsonify({"error": "Missing form data"}), 400)
+    except ValueError:
+        return make_response(jsonify({"error": "Invalid data type"}), 400)
+    except Exception as e:
+        return make_response(jsonify({"error": str(e)}), 500)
 
 
 @budgets_bp.route("/api/v1.0/budgets/<string:id>", methods=["DELETE"])
